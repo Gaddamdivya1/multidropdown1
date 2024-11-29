@@ -1,0 +1,60 @@
+pipeline {
+    agent any
+
+    parameters {
+        choice(name: 'ACCOUNT_ID', choices: ['533267138817'], description: 'AWS Account ID (Predefined)')
+        choice(name: 'VM_TYPE', choices: ['Linux'], description: 'VM Type (Predefined)')
+        choice(name: 'SERVICE', choices: ['Nginx', 'Splunk'], description: 'Select Service to Restart')
+    }
+
+    stages {
+        stage('Authorize Account') {
+            steps {
+                script {
+                    echo "Authorizing account: ${params.ACCOUNT_ID}"
+                    
+                    sh """
+                        aws configure set profile ${params.ACCOUNT_ID}
+                        aws sts get-caller-identity --profile ${params.ACCOUNT_ID}
+                    """
+                }
+            }
+        }
+
+        stage('Select VM') {
+            steps {
+                script {
+                    echo "Selected VM Type: ${params.VM_TYPE}"
+                    echo "Fetching Linux VMs for account: ${params.ACCOUNT_ID}"
+                    
+                    def linuxVM =  "ec2-13-232-96-13.compute-1.amazonaws.com"
+                    echo "Selected VM: ${linuxVM}"
+                }
+            }
+        }
+
+        stage('Restart Service') {
+            steps {
+                script {
+                    echo "Restarting service: ${params.SERVICE} on Linux VM"
+                    
+                    sh """
+                        ssh user@linux-vm 'sudo systemctl restart ${params.SERVICE.toLowerCase()}'
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            echo 'Pipeline execution complete!'
+        }
+        success {
+            echo 'Pipeline executed successfully.'
+        }
+        failure {
+            echo 'Pipeline execution failed. Check logs for details.'
+        }
+    }
+}
