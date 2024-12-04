@@ -1,0 +1,91 @@
+pipeline {
+    agent any  
+
+    environment {
+        AWS_REGION = "ap-south-1"  
+        INSTANCE_ID = "i-0daef2f7384e2b81c"  
+        SERVICE_NAME = "nginx.service"  
+    }
+
+    stages {
+        stage('Confirm Parameters') {
+            steps {
+                script {
+                    echo "AWS Region: ${AWS_REGION}"
+                    echo "Target Instance ID: ${INSTANCE_ID}"
+                    echo "Service to Restart: ${SERVICE_NAME}"
+                }
+            }
+        }
+
+        stage('Send SSM Command to Restart Nginx') {
+            steps {
+                script {
+                    try {
+                        echo "Sending SSM Command to restart ${SERVICE_NAME} on instance ${INSTANCE_ID}..."
+
+                        
+                        def command = """
+                            aws ssm send-command \
+                                --document-name "AWS-RunShellScript" \
+                                --targets "Key=instanceIds,Values=${INSTANCE_ID}" \
+                                --parameters 'commands=["sudo systemctl restart ${SERVICE_NAME}"]' \
+                                --timeout-seconds 600 \
+                                --region ${AWS_REGION} \
+                                --query 'Command.CommandId' \
+                                --output text
+                        """
+                        
+                        
+                        def commandId = sh(script: command, returnStdout: true).trim()
+                        echo "Command sent successfully. Command ID: ${commandId}"
+                    } catch (Exception e) {
+                        currentBuild.result = 'FAILURE'
+                        error "SSM Command failed: ${e.getMessage()}"
+                    }
+                }
+            }
+        }
+
+        stage('Verify Service Status') {
+            steps {
+                script {
+                    try {
+                        echo "Verifying status of ${SERVICE_NAME} on instance ${INSTANCE_ID}..."
+
+                        
+                        def verifyCommand = """
+                            aws ssm send-command \
+                                --document-name "AWS-RunShellScript" \
+                                --targets "Key=instanceIds,Values=${INSTANCE_ID}" \
+                                --parameters 'commands=["sudo systemctl status ${SERVICE_NAME}"]' \
+                                --timeout-seconds 600 \
+                                --region ${AWS_REGION} \
+                                --query 'Command.CommandId' \
+                                --output text
+                        """
+                        
+                        
+                        def verifyCommandId = sh(script: verifyCommand, returnStdout: true).trim()
+                        echo "Verification Command ID: ${verifyCommandId}"
+                    } catch (Exception e) {
+                        currentBuild.result = 'FAILURE'
+                        error "Service verification failed: ${e.getMessage()}"
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            echo "Pipeline execution completed."
+        }
+        success {
+            echo "Service restarted successfully."
+        }
+        failure {
+            echo "Pipeline failed."
+        }
+    }
+}
