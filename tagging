@@ -30,7 +30,7 @@ pipeline {
                 script {
                     echo "Fetching all running instances tagged 'nginx' for account: ${params.ACCOUNT_ID}"
 
-                    // Dynamically fetch instance IDs tagged with Name=nginx
+                    
                     def instanceIds = sh(script: """
                         aws ec2 describe-instances \
                             --filters "Name=tag:Name,Values=nginx" "Name=instance-state-name,Values=running" \
@@ -53,12 +53,12 @@ pipeline {
                 script {
                     echo "Processing each instance..."
                     
-                    // Split instance IDs into a list and loop
+                    
                     def instanceList = env.INSTANCE_IDS.split()
                     for (instanceId in instanceList) {
                         echo "Processing instance: ${instanceId}"
 
-                        // Fetch Public IP
+                        
                         def instanceIp = sh(script: """
                             aws ec2 describe-instances \
                                 --instance-ids ${instanceId} \
@@ -73,7 +73,7 @@ pipeline {
 
                         echo "Instance ${instanceId} has public IP: ${instanceIp}"
 
-                        // Restart service using SSM
+                    
                         echo "Restarting service: ${params.SERVICE} on instance: ${instanceId}"
                         sh """
                             aws ssm send-command \
