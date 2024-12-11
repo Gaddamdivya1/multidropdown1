@@ -1,0 +1,106 @@
+pipeline {
+    agent any
+
+    parameters {
+        choice(name: 'ACCOUNT_ID', choices: ['533267138817'], description: 'AWS Account ID (Predefined)')
+        choice(name: 'VM_TYPE', choices: ['Linux'], description: 'VM Type (Predefined)')
+        choice(name: 'SERVICE', choices: ['Nginx', 'Splunk'], description: 'Select Service to Restart')
+    }
+
+    environment {
+        AWS_ACCESS_KEY_ID = 'AKIAXYKJSZEAR2JGQA5A'
+        
+        AWS_DEFAULT_REGION = 'ap-south-1'
+    }
+
+    stages {
+        stage('Authorize Account') {
+            steps {
+                script {
+                    echo "Using AWS Access Key for authentication"
+                    sh """
+                        aws sts get-caller-identity
+                    """
+                }
+            }
+        }
+
+        stage('Fetch Instances Dynamically') {
+            steps {
+                script {
+                    echo "Fetching all running instances tagged 'nginx' for account: ${params.ACCOUNT_ID}"
+
+                    // Dynamically fetch instance IDs tagged with Name=nginx
+                    def instanceIds = sh(script: """
+                        aws ec2 describe-instances \
+                            --filters "Name=tag:Name,Values=nginx" "Name=instance-state-name,Values=running" \
+                            --query 'Reservations[*].Instances[*].InstanceId' \
+                            --output text --region ${AWS_DEFAULT_REGION}
+                    """, returnStdout: true).trim()
+
+                    if (instanceIds == "") {
+                        error "No running instances tagged 'nginx' found."
+                    }
+
+                    echo "Fetched Instances: ${instanceIds}"
+                    env.INSTANCE_IDS = instanceIds
+                }
+            }
+        }
+
+        stage('Process Instances') {
+            steps {
+                script {
+                    echo "Processing each instance..."
+                    
+                    // Split instance IDs into a list and loop
+                    def instanceList = env.INSTANCE_IDS.split()
+                    for (instanceId in instanceList) {
+                        echo "Processing instance: ${instanceId}"
+
+                        // Fetch Public IP
+                        def instanceIp = sh(script: """
+                            aws ec2 describe-instances \
+                                --instance-ids ${instanceId} \
+                                --query 'Reservations[*].Instances[*].PublicIpAddress' \
+                                --output text --region ${AWS_DEFAULT_REGION}
+                        """, returnStdout: true).trim()
+
+                        if (instanceIp == "None" || instanceIp == "") {
+                            echo "Instance ${instanceId} does not have a public IP. Skipping."
+                            continue
+                        }
+
+                        echo "Instance ${instanceId} has public IP: ${instanceIp}"
+
+                        // Restart service using SSM
+                        echo "Restarting service: ${params.SERVICE} on instance: ${instanceId}"
+                        sh """
+                            aws ssm send-command \
+                                --document-name "AWS-RunShellScript" \
+                                --document-version "1" \
+                                --targets "Key=instanceids,Values=${instanceId}" \
+                                --parameters "commands=['sudo systemctl restart ${params.SERVICE.toLowerCase()}']" \
+                                --timeout-seconds 600 \
+                                --max-concurrency "50" \
+                                --max-errors "0" \
+                                --region ${AWS_DEFAULT_REGION}
+                        """
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            echo 'Pipeline execution complete!'
+        }
+        success {
+            echo 'Pipeline executed successfully.'
+        }
+        failure {
+            echo 'Pipeline execution failed. Check logs for details.'
+        }
+    }
+}
